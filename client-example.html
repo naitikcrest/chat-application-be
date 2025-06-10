@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Socket.IO Chat Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .messages {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 10px 0;
+            background: #fafafa;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 4px;
+            background: #e3f2fd;
+        }
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        input, button {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        input[type="text"] {
+            flex: 1;
+        }
+        button {
+            background: #2196f3;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #1976d2;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            background: #e8f5e8;
+            border: 1px solid #4caf50;
+        }
+        .error {
+            background: #ffebee;
+            border-color: #f44336;
+            color: #c62828;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Socket.IO Chat Test Client</h1>
+        
+        <div id="status" class="status">Disconnected</div>
+        
+        <div class="input-group">
+            <input type="text" id="username" placeholder="Enter username" value="TestUser">
+            <input type="text" id="room" placeholder="Room name" value="general">
+            <button onclick="joinRoom()">Join Room</button>
+        </div>
+        
+        <div class="messages" id="messages"></div>
+        
+        <div class="input-group">
+            <input type="text" id="messageInput" placeholder="Type your message..." disabled>
+            <button onclick="sendMessage()" id="sendBtn" disabled>Send</button>
+        </div>
+        
+        <div class="input-group">
+            <button onclick="getMessages()">Get History</button>
+            <button onclick="getRooms()">Get Rooms</button>
+            <button onclick="getStats()">Get Stats</button>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <script>
+        let socket;
+        let currentRoom = 'general';
+        
+        function updateStatus(message, isError = false) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = isError ? 'status error' : 'status';
+        }
+        
+        function addMessage(message) {
+            const messages = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message';
+            messageDiv.innerHTML = `
+                <strong>${message.username || 'System'}:</strong> 
+                ${message.message} 
+                <small>(${new Date(message.timestamp).toLocaleTimeString()})</small>
+            `;
+            messages.appendChild(messageDiv);
+            messages.scrollTop = messages.scrollHeight;
+        }
+        
+        function connectToServer() {
+            socket = io('http://localhost:5000');
+            
+            socket.on('connect', () => {
+                updateStatus('✅ Connected to server');
+                console.log('Connected to server');
+            });
+            
+            socket.on('disconnect', () => {
+                updateStatus('❌ Disconnected from server', true);
+                document.getElementById('messageInput').disabled = true;
+                document.getElementById('sendBtn').disabled = true;
+            });
+            
+            socket.on('new_message', (message) => {
+                addMessage(message);
+            });
+            
+            socket.on('user_joined', (data) => {
+                addMessage({ username: 'System', message: data.message, timestamp: data.timestamp });
+            });
+            
+            socket.on('user_left', (data) => {
+                addMessage({ username: 'System', message: data.message, timestamp: data.timestamp });
+            });
+            
+            socket.on('message_history', (messages) => {
+                document.getElementById('messages').innerHTML = '';
+                messages.forEach(addMessage);
+            });
+            
+            socket.on('rooms_list', (rooms) => {
+                console.log('Available rooms:', rooms);
+                addMessage({ username: 'System', message: `Available rooms: ${rooms.map(r => r.name).join(', ')}`, timestamp: new Date().toISOString() });
+            });
+            
+            socket.on('error', (error) => {
+                updateStatus(`❌ Error: ${error.message}`, true);
+            });
+        }
+        
+        function joinRoom() {
+            const username = document.getElementById('username').value;
+            const room = document.getElementById('room').value;
+            
+            if (!username || !room) {
+                alert('Please enter username and room');
+                return;
+            }
+            
+            currentRoom = room;
+            socket.emit('join', { username, room });
+            
+            document.getElementById('messageInput').disabled = false;
+            document.getElementById('sendBtn').disabled = false;
+            
+            updateStatus(`✅ Joined room: ${room} as ${username}`);
+        }
+        
+        function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value.trim();
+            
+            if (!message) return;
+            
+            socket.emit('send_message', { message });
+            messageInput.value = '';
+        }
+        
+        function getMessages() {
+            socket.emit('get_messages', { room: currentRoom, limit: 50 });
+        }
+        
+        function getRooms() {
+            socket.emit('get_rooms');
+        }
+        
+        async function getStats() {
+            try {
+                const response = await fetch('http://localhost:5000/api/stats');
+                const stats = await response.json();
+                addMessage({ 
+                    username: 'System', 
+                    message: `Stats - Messages: ${stats.totalMessages}, Users: ${stats.totalUsers}, Connected: ${stats.connectedUsers}, Rooms: ${stats.totalRooms}`, 
+                    timestamp: new Date().toISOString() 
+                });
+            } catch (error) {
+                addMessage({ username: 'System', message: 'Failed to get stats', timestamp: new Date().toISOString() });
+            }
+        }
+        
+        // Enter key to send message
+        document.getElementById('messageInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // Connect on page load
+        connectToServer();
+    </script>
+</body>
+</html>
+
